@@ -6,4 +6,4 @@ Copyright 2013 Awaw Fumin awawfumin@gmail.com
 Licensed under GNU General Public License v3
 
 ## Todos
-* implement `propose_phase_1`
+* implement catchup thread

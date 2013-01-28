@@ -6,10 +6,14 @@ class Paxos::Msg
   def initialize s
     if m = s.match(/(\d+) #{PREPARE} (\d+)/)
       @id = m[1]; @type = PREPARE; @n = m[2]
+
     elsif m = s.match(/(\d+) #{PROMISE} (\d+) (\w+)/)
       @id = m[1]; @type = PROMISE; @n = m[2]; @v = m[3]
+    elsif m = s.match(/(\d+) #{PROMISE} (\d+)/)
+      @id = m[1]; @type = PROMISE; @n = m[2]
     elsif m = s.match(/(\d+) #{PROMISE}/)
       @id = m[1]; @type = PROMISE
+
     elsif m = s.match(/(\d+) #{ACCEPT} (\d+) (\w+)/)
       @id = m[1]; @type = ACCEPT; @n = m[2]; @v = m[3]
     end

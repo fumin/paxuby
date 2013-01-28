@@ -32,7 +32,7 @@ catchup_thread = Thread.new do
   loop do
     end_id = Paxos::CatchupQueue.pop
     (Paxos.smallest_executable_id...end_id).each do |id|
-      res = Paxos.propose_phase_1 id
+      res = Paxos.propose id
       raise unless res
       App.execute res
       res.save_all_i_n_and_v_to_disk
@@ -62,8 +62,8 @@ Thread.new do
         request.promise_to_disk
         client.puts "#{request.id} #{Paxos::Msg::PROMISE}"
       elsif request.n > last_promise.n
-        last_promise.save_n_to_disk
-        client.puts "#{request.id} #{Paxos::Msg::PROMISE} #{last_promise.n} #{last_promise.v}"
+        request.save_n_to_disk
+        client.puts promise.to_s
       elsif request.n <= last_promise.n
         client.puts "#{request.id} #{Paxos::Msg::IGNORED} #{last_promise.n}"
       end 
