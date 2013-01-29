@@ -7,6 +7,7 @@ Licensed under GNU General Public License v3
 
 ## Todos
 ### status
+* use `ruby main.rb localhost:6660`
 * single replica is OK
 ### todos
 * test multiple replicas
