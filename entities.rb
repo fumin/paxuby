@@ -2,7 +2,7 @@ module Paxos; end
 class Paxos::Msg
   PREPARE = 'prepare'; PROMISE = 'promise'; ACCEPT = 'accept'
   ACCEPTED = 'accepted'; IGNORED = 'ignored'
-  attr_reader :id, :type, :n, :v, :exec_result
+  attr_reader :id, :type, :n, :v, :exec_result. :addr
   def self.create s
     msg = new s
     msg.type ? msg : nil
@@ -21,8 +21,8 @@ class Paxos::Msg
 
     elsif m = s.match(/^(\d+) #{ACCEPT} (\d+) ([\w\s]+)$/)
       @id = m[1].to_i; @type = ACCEPT; @n = m[2].to_i; @v = m[3]
-    elsif m = s.match(/^(\d+) #{ACCEPTED} ([\w\s]*)$/)
-      @id = m[1].to_i; @type = ACCEPTED; @exec_result = m[2]
+    elsif m = s.match(/^(\d+) #{ACCEPTED} ([\w\.:]+) ([\w\s]*)$/)
+      @id = m[1].to_i; @type = ACCEPTED; @addr = m[2]; @exec_result = m[3]
     elsif m = s.match(/^(\d+) #{IGNORED} (\d+)$/)
       @id = m[1].to_i; @type = IGNORED; @n = m[2].to_i
     end
@@ -57,8 +57,8 @@ class Paxos::FailedProposal
 end
 
 class Paxos::SuccessfulProposal
-  attr_reader :id, :n, :v, :exec_result
-  def initialize id_, n_, v_, exec_res
-    @id = id_; @n = n_; @v = v_; @exec_result = exec_res
+  attr_reader :id, :n, :v, :accepted_msgs
+  def initialize id_, n_, v_, acc_msgs
+    @id = id_; @n = n_; @v = v_; @accepted_msgs = acc_msgs
   end
 end

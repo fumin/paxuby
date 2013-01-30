@@ -13,28 +13,31 @@ module Paxos
   ClientHandlerQueue = Queue.new
   CatchupQueue = Queue.new
   LocalData = {}
+  SmallestProposeN = 1
+  PingFromLeaderTimeout = 0.75 # seconds
   module_function
   def propose id, command, opts={}
     res = Paxos::FailedProposal.new(id, 1)
     timeout = (opts[:timeout].to_f > 0 ? opts[:timeout].to_f : Float::Infinity)
-    opts[:disk_conn] = disk_conn
+    opts[:disk_conn] ||= disk_conn
 
     start_time = Time.now.to_f
     while Time.now.to_f < start_time + timeout do
       res = Paxos._propose id, command, opts
       return res if res.is_a?(Paxos::SuccessfulProposal)
-      opts[:n] = res.enemy_n + (rand * H[:addrs].size + 1).to_i
-      sleep(rand * H[:addrs].size + 1)
+      opts[:n] = increment_n(res.enemy_n)
     end
     res
   end
   def _propose id, command, opts={}
-    n = opts[:n] || select_n_where_id_from_disk(id, opts[:disk_conn]) || 1
+    n = opts[:n] ||
+          select_n_where_id_from_disk(id, opts[:disk_conn]) || SmallestProposeN
+    raise "#{n} < SmallestProposeN" unless n >= SmallestProposeN
 
     promise_msgs, ignore_msgs = send_prepare_msgs id, n
 
     # send accept message if a majority of replicas promised us
-    if promise_msgs.size > H[:addrs].size.to_f / 2
+    if promise_msgs.size > H['addrs'].size.to_f / 2
       promise_msgs_with_n = promise_msgs.select{|m| m.n}
       v = if promise_msgs_with_n.size > 0
             promise_msgs_with_n.max{|a, b| a.n <=> b.n}.v || command
@@ -44,8 +47,8 @@ module Paxos
       accepted_msgs, ignore_msgs = send_accept_msgs id, n, v
 
       # consenses reached if a majority of replicas accepted
-      if accepted_msgs.size > H[:addrs].size.to_f/2
-        return SuccessfulProposal.new(id, n, v, accepted_msgs[0].exec_result)
+      if accepted_msgs.size > H['addrs'].size.to_f/2
+        return SuccessfulProposal.new(id, n, v, accepted_msgs)
       end
     end
 
@@ -66,9 +69,9 @@ module Paxos
     ignore_msgs = responses.select{|r| r.type == Msg::IGNORED}
     [accepted_msgs, ignore_msgs]
   end
-  def send_msg_to_acceptors_and_collect_reponses msg_to_be_sent, timeout=3
+  def send_msg_to_acceptors_and_collect_reponses msg_to_be_sent
     responses = []; threads = [];
-    H[:addrs].each do |addr|
+    H['addrs'].each do |addr|
       next unless (s = tcp_socket(addr))
       threads << Thread.new(s) do |acceptor|
         str_msg = nil
@@ -94,7 +97,8 @@ module Paxos
     conn = disk_conn
     conn.execute <<-SQL
       CREATE TABLE paxos(
-        id INTEGER PRIMARY KEY, promised_n INTEGER NOT NULL, v TEXT);
+        id INTEGER PRIMARY KEY,
+        promised_n INTEGER NOT NULL CHECK(promised_n > 0), v TEXT);
     SQL
     conn.execute <<-SQL
       CREATE TRIGGER update_paxos BEFORE UPDATE OF promised_n ON paxos BEGIN
@@ -112,14 +116,24 @@ module Paxos
   def smallest_executable_id
     r = disk_conn.execute(
           'SELECT id FROM paxos WHERE v IS NOT NULL ORDER BY id DESC LIMIT 1')[0]
-    (r || [0])[0] + 1
+    r ? r[0] : 0
   end
-  def tcp_socket addr
+  def tcp_socket addr_
+    addr = if Paxos::LocalData['local_addr'] == addr_
+             "localhost:#{Paxos::LocalData['local_port']}"
+           else
+             addr_
+           end
     m = addr.match(/([\w\d\.]+):(\d+)/)
     return nil unless m.size == 3
     Timeout::timeout(3) do
       TCPSocket.new m[1], m[2].to_i
     end
   rescue Timeout::Error, Errno::ECONNREFUSED
+  end
+  def increment_n n
+    ind = H['addrs'].index(LocalData['local_addr'])
+    raise "#{LocalData['local_addr']} not in #{H['addrs']}" unless ind
+    (n.to_i / H['addrs'].size + 1) * H['addrs'].size + ind + 1
   end
 end
