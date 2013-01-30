@@ -1,19 +1,44 @@
+require 'ipaddr'
+
 require './paxos'
 require './app'
 
 `rm paxos.db`
 Paxos.setup_disk
 
-Paxos::LocalData[:local_addr] = ARGV[0]
+Paxos::LocalData['local_addr'] = ARGV[0]
 Paxos::LocalData['local_port'] =
   Paxos::LocalData['local_addr'].match(/:(\d+)$/)[1].to_i
 
-#Paxos::H[:addrs] = ['localhost:6660', 'localhost:6661', 'localhost:6662']
-Paxos::H['addrs'] = ['localhost:6660']
+#Paxos::H[:addrs] = ['127.0.0.1:6660', '127.0.0.1:6661', '127.0.0.1:6662']
+Paxos::H['addrs'] = ['127.0.0.1:6660']
 Paxos::H['leader'] = Paxos::H['addrs'][0]
 
 puts "ADDR: #{Paxos::LocalData['local_addr']}, PORT: #{Paxos::LocalData['local_port']}, H: #{Paxos::H}"
 
+# heartbeat listener thread
+Thread.new do
+  Thread.current.abort_on_exception = true
+  local_addr = Paxos::LocalData['local_addr']
+  loop do
+    if local_addr == Paxos::H['leader']
+      sleep Paxos::HeartbeatTimeout; next
+    end
+
+    start_time = Time.now.to_f
+    s = Paxos.tcp_socket Paxos::H['leader']
+    s.send "#{Paxos::HeartbeatPing}\n", 0
+    time_left = Paxos::HeartbeatTimeout - (Time.now.to_f - start_time)
+    if time_left <= 0 or IO.select([s], nil, nil, time_left).nil?
+      command = "#{Paxos::App::Command::SET} leader #{local_addr}"
+      p = Paxos.propose Paxos.smallest_executable_id, command, timeout: 0.3
+      if p.is_a?(Paxos::SuccessfulProposal) and local_addr == Paxos::H['leader']
+        Paxos::ClientHandlerQueue << Paxos::ClientHandlerRefreshId
+      end
+    end
+    s.recv 1024; s.close
+  end
+end
 # Client handler thread
 Thread.new do
   Thread.current.abort_on_exception = true
@@ -22,31 +47,30 @@ Thread.new do
   n = Paxos::SmallestProposeN - 1
   loop do
     command, client = Paxos::ClientHandlerQueue.pop
-
-    if we are woke up to set leader to us
-      Paxos.propose, Paxos.smallest_executable_id, 'set leader to_us', timeout:
-    else
-      multi_paxos
+    if command == Paxos::ClientHandlerRefreshId
+      id = Paxos.smallest_executable_id; next
+    end
+    unless local_addr == Paxos::H['leader']
+      client.puts "Please contact the leader: #{Paxos::H['leader']}"
+      client.close; next
     end
 
-    id = if command == "#{Paxos::App::Command::SET} leader #{local_addr}"
-           # Here, our ping listener told us to wake up, thus we need refresh id
-           id = Paxos.smallest_executable_id
-         else
-           id + 1
-         end
-
-    # Run multi-paxos (omit prepare messages). In this case 'n' must be
-    # chosen to be smaller
-    acc_msgs, ign_msgs = send_accept_msgs id, n, command
+    # Run multi-paxos (omit prepare messages).
+    # We always chose n as `Paxos::SmallestProposeN - 1` so that it is
+    # impossible for us to overwrite an established consensus for this id,
+    # and that there can only be two possible outcomes:
+    # 1. A majority of replicas successfully executes our command
+    # 2. We got ignored by a majority of replicas because they held promises
+    #    with larger n's
+    acc_msgs, ign_msgs = Paxos.send_accept_msgs id, n, command
     if acc_msgs.size > (Paxos::H['addrs'].size.to_f / 2)
       client.puts acc_msgs[0].exec_result
-    else
-      # Someone succeeded in becoming leader in advance of us, respect her
+    else # we got ignored
       client.puts "Please contact the leader: #{Paxos::H['leader']}"
       sleep 0.2
     end
     client.close
+    id += 1
   end
 end
 # catchup thread
@@ -126,10 +150,16 @@ loop do
   Thread.new(server.accept) do |client|
     Thread.current.abort_on_exception = true
     str_msg = client.gets
-    if str_msg[-1] != "\n"
+    if str_msg.nil?
+      client.close; Thread.exit
+    elsif str_msg[-1] != "\n"
       client.puts "newline at the end needed"; client.close; Thread.exit
     else
       str_msg = str_msg[0...-1]
+    end
+
+    if str_msg == Paxos::HeartbeatPing
+      client.puts HeartbeatPong; client.close; Thread.exit
     end
 
     if (paxos_msg = Paxos::Msg.create(str_msg))
@@ -137,14 +167,9 @@ loop do
     else
       command = ::App::Command.new(str_msg)
       if command.err_msg
-        client.puts command.err_msg; client.close
+        client.puts command.err_msg; client.close; Thread.exit
       end
-      if Paxos::LocalData['local_addr'] == Paxos::H['leader']
-        Paxos::ClientHandlerQueue << [str_msg, client]
-      else
-        client.puts "Please contact the leader: #{Paxos::H['leader']}"
-        client.close
-      end
+      Paxos::ClientHandlerQueue << [str_msg, client]
     end
 
   end # Thread.new do

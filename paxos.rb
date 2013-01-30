@@ -1,3 +1,4 @@
+require 'fcntl'
 require 'thread'
 require 'socket'
 require 'timeout'
@@ -14,11 +15,16 @@ module Paxos
   CatchupQueue = Queue.new
   LocalData = {}
   SmallestProposeN = 1
-  PingFromLeaderTimeout = 0.75 # seconds
+
+  HeartbeatPing = 'paxos_heartbeat_ping'
+  HeartbeatPong = 'paxos_heartbeat_pong'
+  HeartbeatTimeout = 0.75 # seconds
+
+  ClientHandlerRefreshId = 'client_handler_refresh_id'
   module_function
   def propose id, command, opts={}
     res = Paxos::FailedProposal.new(id, 1)
-    timeout = (opts[:timeout].to_f > 0 ? opts[:timeout].to_f : Float::Infinity)
+    timeout = (opts[:timeout].to_f > 0 ? opts[:timeout].to_f : Float::INFINITY)
     opts[:disk_conn] ||= disk_conn
 
     start_time = Time.now.to_f
@@ -76,12 +82,10 @@ module Paxos
       threads << Thread.new(s) do |acceptor|
         str_msg = nil
         begin
-          rs, ws, = IO.select([], [acceptor], [], 0.1) # 0.1 second
-          raise Timeout::Error unless ws
-          acceptor.sendmsg_nonblock(msg_to_be_sent+"\n")
+          acceptor.send(msg_to_be_sent+"\n", 0)
           rs, ws, = IO.select([acceptor], [], [], 0.1)
           raise Timeout::Error unless rs
-          str_ = acceptor.recv_nonblock(1024)
+          str_ = acceptor.recv(1024)
           str_msg = (str_[-1] == "\n" ? str_[0...-1] : "")
         rescue Timeout::Error, Errno::ECONNRESET => e
         ensure acceptor.close; end
@@ -98,7 +102,7 @@ module Paxos
     conn.execute <<-SQL
       CREATE TABLE paxos(
         id INTEGER PRIMARY KEY,
-        promised_n INTEGER NOT NULL CHECK(promised_n > 0), v TEXT);
+        promised_n INTEGER NOT NULL CHECK(promised_n > -1), v TEXT);
     SQL
     conn.execute <<-SQL
       CREATE TRIGGER update_paxos BEFORE UPDATE OF promised_n ON paxos BEGIN
@@ -116,20 +120,24 @@ module Paxos
   def smallest_executable_id
     r = disk_conn.execute(
           'SELECT id FROM paxos WHERE v IS NOT NULL ORDER BY id DESC LIMIT 1')[0]
-    r ? r[0] : 0
+    (r ? r[0] : 0) + 1
   end
-  def tcp_socket addr_
+  def tcp_socket addr_, timeout=0.2
     addr = if Paxos::LocalData['local_addr'] == addr_
-             "localhost:#{Paxos::LocalData['local_port']}"
+             "127.0.0.1:#{Paxos::LocalData['local_port']}"
            else
              addr_
            end
     m = addr.match(/([\w\d\.]+):(\d+)/)
-    return nil unless m.size == 3
-    Timeout::timeout(3) do
-      TCPSocket.new m[1], m[2].to_i
+    socket = Socket.new(Socket::AF_INET, Socket::SOCK_STREAM, 0)
+    begin; socket.connect_nonblock(Socket.pack_sockaddr_in(m[2].to_i, m[1]))
+    rescue Errno::EINPROGRESS; end
+    rs, ws, = IO.select([], [socket], [], timeout)
+    if ws
+      ws[0]
+    else
+      nil
     end
-  rescue Timeout::Error, Errno::ECONNREFUSED
   end
   def increment_n n
     ind = H['addrs'].index(LocalData['local_addr'])

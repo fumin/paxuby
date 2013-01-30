@@ -2,7 +2,7 @@ module Paxos; end
 class Paxos::Msg
   PREPARE = 'prepare'; PROMISE = 'promise'; ACCEPT = 'accept'
   ACCEPTED = 'accepted'; IGNORED = 'ignored'
-  attr_reader :id, :type, :n, :v, :exec_result. :addr
+  attr_reader :id, :type, :n, :v, :exec_result, :addr
   def self.create s
     msg = new s
     msg.type ? msg : nil
