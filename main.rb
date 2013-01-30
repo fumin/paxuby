@@ -58,19 +58,23 @@ Thread.new do
     # Run multi-paxos (omit prepare messages).
     # We always chose n as `Paxos::SmallestProposeN - 1` so that it is
     # impossible for us to overwrite an established consensus for this id,
-    # and that there can only be two possible outcomes:
+    # and that there can only be three possible outcomes:
     # 1. A majority of replicas successfully executes our command
     # 2. We got ignored by a majority of replicas because they held promises
     #    with larger n's
+    # 3. Network glitch
     acc_msgs, ign_msgs = Paxos.send_accept_msgs id, n, command
     if acc_msgs.size > (Paxos::H['addrs'].size.to_f / 2)
       client.puts acc_msgs[0].exec_result
-    else # we got ignored
+      id += 1
+    elsif ign_msgs.size > 0
       client.puts "Please contact the leader: #{Paxos::H['leader']}"
+      id += 1
       sleep 0.2
+    else
+      client.puts "Please contact the leader: #{Paxos::H['leader']}"
     end
     client.close
-    id += 1
   end
 end
 # catchup thread
