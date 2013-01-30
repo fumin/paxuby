@@ -60,7 +60,7 @@ Thread.new do
     # impossible for us to overwrite an established consensus for this id,
     # and that there can only be three possible outcomes:
     # 1. A majority of replicas successfully executes our command
-    # 2. We got ignored by a majority of replicas because they held promises
+    # 2. We got ignored by some replicas because they held promises
     #    with larger n's
     # 3. Network glitch
     acc_msgs, ign_msgs = Paxos.send_accept_msgs id, n, command
