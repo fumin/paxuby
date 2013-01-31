@@ -83,11 +83,16 @@ module Paxos
         str_msg = nil
         begin
           acceptor.send(msg_to_be_sent+"\n", 0)
-          rs, ws, = IO.select([acceptor], [], [], 0.1)
-          raise Timeout::Error unless rs
-          str_ = acceptor.recv(1024)
+
+          str_ = ''; start_time = Time.now.to_f
+          while Time.now.to_f < start_time + 0.1
+            rs, ws, = IO.select([acceptor], [], [], 0.1)
+            raise Timeout::Error unless rs
+            str_ << acceptor.recv(1024)
+          end
+
           str_msg = (str_[-1] == "\n" ? str_[0...-1] : "")
-        rescue Timeout::Error, Errno::ECONNRESET => e
+        rescue Timeout::Error, Errno::ECONNRESET, Errno::EPIPE
         ensure acceptor.close; end
         msg = Paxos::Msg.new str_msg
         responses << msg if msg.type
@@ -96,9 +101,11 @@ module Paxos
     threads.each{|t| t.join}
     responses
   end
-  def disk_conn; SQLite3::Database.new "paxos.db"; end
-  def setup_disk
-    conn = disk_conn
+  def disk_conn fn=nil
+    SQLite3::Database.new(fn || "#{Paxos::LocalData['local_addr']}paxos.db")
+  end
+  def setup_disk fn=nil
+    conn = disk_conn fn
     conn.execute <<-SQL
       CREATE TABLE paxos(
         id INTEGER PRIMARY KEY,
@@ -121,6 +128,28 @@ module Paxos
     r = disk_conn.execute(
           'SELECT id FROM paxos WHERE v IS NOT NULL ORDER BY id DESC LIMIT 1')[0]
     (r ? r[0] : 0) + 1
+  end
+  def should_become_leader?
+    start_time = Time.now.to_f
+    s = Paxos.tcp_socket Paxos::H['leader']
+    if s
+      send_failed = false
+      begin; s.send "#{Paxos::HeartbeatPing}\n", 0
+      rescue Errno::EPIPE; send_failed = true; end
+      if send_failed
+        true
+      else
+        time_left = Paxos::HeartbeatTimeout - (Time.now.to_f - start_time)
+        if time_left <= 0 or IO.select([s], nil, nil, time_left).nil?
+          true
+        else
+          s.recv 1024; s.close
+          false
+        end
+      end
+    else
+      true
+    end
   end
   def tcp_socket addr_, timeout=0.2
     addr = if Paxos::LocalData['local_addr'] == addr_

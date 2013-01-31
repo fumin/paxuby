@@ -3,40 +3,33 @@ require 'ipaddr'
 require './paxos'
 require './app'
 
-`rm paxos.db`
-Paxos.setup_disk
-
 Paxos::LocalData['local_addr'] = ARGV[0]
 Paxos::LocalData['local_port'] =
   Paxos::LocalData['local_addr'].match(/:(\d+)$/)[1].to_i
 
-#Paxos::H[:addrs] = ['127.0.0.1:6660', '127.0.0.1:6661', '127.0.0.1:6662']
-Paxos::H['addrs'] = ['127.0.0.1:6660']
+Paxos::H['addrs'] = ['127.0.0.1:6660', '127.0.0.1:6661', '127.0.0.1:6662']
+#Paxos::H['addrs'] = ['127.0.0.1:6660']
 Paxos::H['leader'] = Paxos::H['addrs'][0]
 
-puts "ADDR: #{Paxos::LocalData['local_addr']}, PORT: #{Paxos::LocalData['local_port']}, H: #{Paxos::H}"
+puts "pid: #{Process.pid}, ADDR: #{Paxos::LocalData['local_addr']}, PORT: #{Paxos::LocalData['local_port']}, H: #{Paxos::H}"
 
 # heartbeat listener thread
 Thread.new do
   Thread.current.abort_on_exception = true
   local_addr = Paxos::LocalData['local_addr']
+  sleep(Paxos::HeartbeatTimeout)
   loop do
     if local_addr == Paxos::H['leader']
       sleep Paxos::HeartbeatTimeout; next
     end
 
-    start_time = Time.now.to_f
-    s = Paxos.tcp_socket Paxos::H['leader']
-    s.send "#{Paxos::HeartbeatPing}\n", 0
-    time_left = Paxos::HeartbeatTimeout - (Time.now.to_f - start_time)
-    if time_left <= 0 or IO.select([s], nil, nil, time_left).nil?
+    if Paxos.should_become_leader?
       command = "#{Paxos::App::Command::SET} leader #{local_addr}"
       p = Paxos.propose Paxos.smallest_executable_id, command, timeout: 0.3
       if p.is_a?(Paxos::SuccessfulProposal) and local_addr == Paxos::H['leader']
         Paxos::ClientHandlerQueue << Paxos::ClientHandlerRefreshId
       end
     end
-    s.recv 1024; s.close
   end
 end
 # Client handler thread
@@ -163,7 +156,10 @@ loop do
     end
 
     if str_msg == Paxos::HeartbeatPing
-      client.puts HeartbeatPong; client.close; Thread.exit
+      begin; client.puts Paxos::HeartbeatPong
+      rescue Errno::EPIPE
+      ensure; client.close; end
+      Thread.exit
     end
 
     if (paxos_msg = Paxos::Msg.create(str_msg))
@@ -171,7 +167,10 @@ loop do
     else
       command = ::App::Command.new(str_msg)
       if command.err_msg
-        client.puts command.err_msg; client.close; Thread.exit
+        begin; client.puts command.err_msg
+        rescue Errno::EPIPE
+        ensure; client.close; end
+        Thread.exit
       end
       Paxos::ClientHandlerQueue << [str_msg, client]
     end
