@@ -17,13 +17,12 @@ puts "pid: #{Process.pid}, ADDR: #{Paxos::LocalData['local_addr']}, PORT: #{Paxo
 Thread.new do
   Thread.current.abort_on_exception = true
   local_addr = Paxos::LocalData['local_addr']
-  sleep(Paxos::HeartbeatTimeout)
   loop do
-    if local_addr == Paxos::H['leader']
-      sleep Paxos::HeartbeatTimeout; next
-    end
+    sleep(Paxos::HeartbeatTimeout)
+    next if local_addr == Paxos::H['leader']
 
     if Paxos.should_become_leader?
+      puts "TRYTOBELEADER!!!!!!!!! #{Process.pid}"
       command = "#{Paxos::App::Command::SET} leader #{local_addr}"
       p = Paxos.propose Paxos.smallest_executable_id, command, timeout: 0.3
       if p.is_a?(Paxos::SuccessfulProposal) and local_addr == Paxos::H['leader']
@@ -77,7 +76,7 @@ Thread.new do
   loop do
     end_id = Paxos::CatchupQueue.pop
     puts "!#{end_id}CATCHING UP#{Paxos.smallest_executable_id}!!!!!!"
-    (Paxos.smallest_executable_id...end_id).each do |id|
+    (Paxos.smallest_executable_id..end_id).each do |id|
       # propose until our acceptor has accepted for this id
       loop do
         p = Paxos.propose id, Paxos::App::Command::NoOp

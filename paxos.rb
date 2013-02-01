@@ -39,7 +39,6 @@ module Paxos
     n = opts[:n] ||
           select_n_where_id_from_disk(id, opts[:disk_conn]) || SmallestProposeN
     raise "#{n} < SmallestProposeN" unless n >= SmallestProposeN
-
     promise_msgs, ignore_msgs = send_prepare_msgs id, n
 
     # send accept message if a majority of replicas promised us
@@ -89,6 +88,7 @@ module Paxos
             rs, ws, = IO.select([acceptor], [], [], 0.1)
             raise Timeout::Error unless rs
             str_ << acceptor.recv(1024)
+            break if str_[-1] == "\n"
           end
 
           str_msg = (str_[-1] == "\n" ? str_[0...-1] : "")
@@ -131,19 +131,20 @@ module Paxos
   end
   def should_become_leader?
     start_time = Time.now.to_f
-    s = Paxos.tcp_socket Paxos::H['leader']
+    s = tcp_socket H['leader']
     if s
       send_failed = false
-      begin; s.send "#{Paxos::HeartbeatPing}\n", 0
+      begin; s.send "#{HeartbeatPing}\n", 0
       rescue Errno::EPIPE; send_failed = true; end
       if send_failed
         true
       else
-        time_left = Paxos::HeartbeatTimeout - (Time.now.to_f - start_time)
+        time_left = HeartbeatTimeout - (Time.now.to_f - start_time)
         if time_left <= 0 or IO.select([s], nil, nil, time_left).nil?
           true
         else
-          s.recv 1024; s.close
+          begin; s.recv 1024; rescue Errno::ECONNRESET; end
+          s.close
           false
         end
       end
@@ -157,7 +158,7 @@ module Paxos
            else
              addr_
            end
-    m = addr.match(/([\w\d\.]+):(\d+)/)
+    m = addr.match(/([\w\.]+):(\d+)/)
     socket = Socket.new(Socket::AF_INET, Socket::SOCK_STREAM, 0)
     begin; socket.connect_nonblock(Socket.pack_sockaddr_in(m[2].to_i, m[1]))
     rescue Errno::EINPROGRESS; end
