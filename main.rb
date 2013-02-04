@@ -1,7 +1,7 @@
 require 'ipaddr'
 
 require './paxos'
-require './app'
+require './app/app'
 
 Paxos::LocalData['local_addr'] = ARGV[0]
 Paxos::LocalData['local_port'] =
@@ -18,7 +18,7 @@ Thread.new do
   Thread.current.abort_on_exception = true
   local_addr = Paxos::LocalData['local_addr']
   loop do
-    sleep(Paxos::HeartbeatTimeout)
+    sleep(Paxos::HeartbeatTimeout + 0.5*rand)
     next if local_addr == Paxos::H['leader']
 
     if Paxos.should_become_leader?
@@ -35,12 +35,13 @@ end
 Thread.new do
   Thread.current.abort_on_exception = true
   local_addr = Paxos::LocalData['local_addr']
+  db = Paxos.disk_conn
   id = Paxos.smallest_executable_id
   n = Paxos::SmallestProposeN - 1
   loop do
     command, client = Paxos::ClientHandlerQueue.pop
     if command == Paxos::ClientHandlerRefreshId
-      id = Paxos.smallest_executable_id; next
+      id = Paxos.smallest_executable_id(db); next
     end
     unless local_addr == Paxos::H['leader']
       client.puts "Please contact the leader: #{Paxos::H['leader']}"
@@ -73,13 +74,14 @@ end
 Thread.new do
   Thread.current.abort_on_exception = true
   local_addr = Paxos::LocalData['local_addr']
+  db = Paxos.disk_conn
   loop do
     end_id = Paxos::CatchupQueue.pop
     puts "!#{end_id}CATCHING UP#{Paxos.smallest_executable_id}!!!!!!"
     (Paxos.smallest_executable_id..end_id).each do |id|
       # propose until our acceptor has accepted for this id
       loop do
-        p = Paxos.propose id, Paxos::App::Command::NoOp
+        p = Paxos.propose id, Paxos::App::Command::NoOp, disk_conn: db
         break if p.accepted_msgs.find{|m| m.addr == local_addr }
       end
     end
@@ -90,11 +92,12 @@ end
 Thread.new do
   Thread.current.abort_on_exception = true
   local_addr = Paxos::LocalData['local_addr']
+  db = Paxos.disk_conn
   Paxos::LocalData['catching_up'] = false
   loop do
     request, client = Paxos::AcceptorQueue.pop
     # Become a non-voting member and start catching up if we're lagging behind
-    if Paxos.smallest_executable_id < request.id
+    if Paxos.smallest_executable_id(db) < request.id
       unless Paxos::LocalData['catching_up']
         Paxos::LocalData['catching_up'] = true
         Paxos::CatchupQueue << request.id
@@ -102,24 +105,22 @@ Thread.new do
       client.close; next
     end
 
-    last_promise = Paxos::Disk.find_by_id(request.id)
+    last_promise = Paxos::Disk.find_by_id(request.id, db)
     case request.type
     when Paxos::Msg::PREPARE
       if last_promise.nil? or request.n > last_promise.n
-        Paxos::Disk.new(request.id, request.n, request.v).save_n_to_disk
+        Paxos::Disk.new(request.id, request.n, request.v).save_n_to_disk(db)
         response = "#{request.id} #{Paxos::Msg::PROMISE}"
-        if last_promise
-          response << " #{last_promise.n}"
-          response << " #{last_promise.v}" if last_promise.v
+        if last_promise and last_promise.v
+          response << " #{last_promise.n} #{last_promise.v}"
         end
-        client.puts response
       elsif request.n <= last_promise.n
-        client.puts "#{request.id} #{Paxos::Msg::IGNORED} #{last_promise.n}"
+        response = "#{request.id} #{Paxos::Msg::IGNORED} #{last_promise.n}"
       end 
     when Paxos::Msg::ACCEPT
       unless (last_promise and last_promise.n > request.n)
         if last_promise and request.v == last_promise.v
-          client.puts "#{request.id} #{Paxos::Msg::ACCEPTED} #{local_addr} "
+          response = "#{request.id} #{Paxos::Msg::ACCEPTED} #{local_addr} "
         else
           exec_res = if (paxos_command = Paxos::App::Command.create(request.v))
                        Paxos::App.execute paxos_command
@@ -127,17 +128,18 @@ Thread.new do
                        App.execute request.v
                      end
           if exec_res.is_successful
-            Paxos::Disk.new(request.id, request.n, request.v).save_n_v_to_disk
-            client.puts "#{request.id} #{Paxos::Msg::ACCEPTED} #{local_addr} #{exec_res.value}"
+            Paxos::Disk.new(request.id, request.n, request.v).save_n_v_to_disk db
+            response = "#{request.id} #{Paxos::Msg::ACCEPTED} #{local_addr} #{exec_res.value}"
           else
-            client.puts "#{request.id} execution_failed"
+            response = "#{request.id} execution_failed"
           end
         end
       else
-        client.puts "#{request.id} #{Paxos::Msg::IGNORED} #{last_promise.n}"
+        response = "#{request.id} #{Paxos::Msg::IGNORED} #{last_promise.n}"
       end
     end
-    client.close
+    begin; Paxos::Sock.puts_with_timeout client, response, 0.1
+    rescue Errno::EPIPE; ensure client.close; end
   end
 end
 # main thread handles socket
@@ -155,20 +157,18 @@ loop do
     end
 
     if str_msg == Paxos::HeartbeatPing
-      begin; client.puts Paxos::HeartbeatPong
-      rescue Errno::EPIPE
-      ensure; client.close; end
+      Paxos::Sock.puts_and_close client, Paxos::HeartbeatPong
       Thread.exit
     end
 
     if (paxos_msg = Paxos::Msg.create(str_msg))
       Paxos::AcceptorQueue << [paxos_msg, client]
+    elsif (paxos_command = Paxos::App::Command.create(str_msg))
+      Paxos::ClientHandlerQueue << [str_msg, client]
     else
       command = ::App::Command.new(str_msg)
       if command.err_msg
-        begin; client.puts command.err_msg
-        rescue Errno::EPIPE
-        ensure; client.close; end
+        Paxos::Sock.puts_and_close client, command.err_msg
         Thread.exit
       end
       Paxos::ClientHandlerQueue << [str_msg, client]

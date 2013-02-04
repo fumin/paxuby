@@ -13,7 +13,4 @@ Copyright 2013 Awaw Fumin awawfumin@gmail.com
 Licensed under GNU Affero General Public License v3
 
 ## Todos
-* kill leader, other replica becomes leader, data consistency, leader wakes up and catchup, becomes leader after 2 secs, data consistency
-* shouldn't work when 2 machines killed
-
 * implement snapshots

@@ -8,7 +8,7 @@ module Paxos::App
       command.instruction ? command : nil
     end
     def initialize s
-      if m = s.match(/^#{SET} (\w+) (\w+)$/)
+      if m = s.match(/^#{SET} (\w+) (\S+)$/)
         @instruction = SET; @k = m[1]; @v = m[2]
       elsif m = s.match(/^#{GET} (\w+)$/)
         @instruction = GET; @k = m[1]

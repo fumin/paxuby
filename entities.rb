@@ -12,40 +12,18 @@ class Paxos::Msg
     if m = s.match(/^(\d+) #{PREPARE} (\d+)$/)
       @id = m[1].to_i; @type = PREPARE; @n = m[2].to_i
 
-    elsif m = s.match(/^(\d+) #{PROMISE} (\d+) ([\w\s]+)$/)
+    elsif m = s.match(/^(\d+) #{PROMISE} (\d+) (.+)$/)
       @id = m[1].to_i; @type = PROMISE; @n = m[2].to_i; @v = m[3]
-    elsif m = s.match(/^(\d+) #{PROMISE} (\d+)$/)
-      @id = m[1].to_i; @type = PROMISE; @n = m[2].to_i
     elsif m = s.match(/^(\d+) #{PROMISE}$/)
       @id = m[1].to_i; @type = PROMISE
 
-    elsif m = s.match(/^(\d+) #{ACCEPT} (\d+) ([\w\s]+)$/)
+    elsif m = s.match(/^(\d+) #{ACCEPT} (\d+) (.+)$/)
       @id = m[1].to_i; @type = ACCEPT; @n = m[2].to_i; @v = m[3]
-    elsif m = s.match(/^(\d+) #{ACCEPTED} ([\w\.:]+) ([\w\s]*)$/)
+    elsif m = s.match(/^(\d+) #{ACCEPTED} ([\w\.:]+) (.*)$/)
       @id = m[1].to_i; @type = ACCEPTED; @addr = m[2]; @exec_result = m[3]
     elsif m = s.match(/^(\d+) #{IGNORED} (\d+)$/)
       @id = m[1].to_i; @type = IGNORED; @n = m[2].to_i
     end
-  end
-end
-
-class Paxos::Disk
-  attr_reader :id, :n, :v
-  def self.find_by_id id_
-    db = Paxos.disk_conn
-    r = db.execute("SELECT id, promised_n, v FROM paxos WHERE id=#{id_}")[0]
-    r ? new(*r) : nil
-  end
-  def initialize id_, n_, v_
-    @id = id_; @n = n_; @v = v_
-  end
-  def save_n_v_to_disk
-    raise "id and n should not be nil" unless @id and @n
-    Paxos.disk_conn.execute("INSERT OR REPLACE INTO paxos(id, promised_n, v) VALUES(#{@id}, #{@n}, '#{@v || 'NULL'}')")
-  end
-  def save_n_to_disk
-    raise "id and n should not be nil" unless @id and @n
-    Paxos.disk_conn.execute("INSERT OR REPLACE INTO paxos(id, promised_n, v) VALUES(#{@id}, #{@n}, (SELECT v FROM paxos WHERE id=#{@id}))")
   end
 end
 

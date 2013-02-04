@@ -6,7 +6,7 @@ module App
     SET = 'SET'; GET = 'GET'; DEL = 'DEL'
     attr_reader :type, :key, :value, :err_msg
     def initialize s
-      if m = s.match(/^#{SET} (\w+) (\w+)$/)
+      if m = s.match(/^#{SET} (\w+) (\S+)$/)
         @type = SET; @key = m[1]; @value = m[2]
       elsif m = s.match(/^#{GET} (\w+)$/)
         @type = GET; @key = m[1]
