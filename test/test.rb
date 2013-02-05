@@ -12,8 +12,6 @@ describe 'test paxos' do
       FileUtils.rm ["#{addr}paxos.db"], force: true
       Paxos.setup_disk "#{addr}paxos.db"
     end
-    ObjectSpace.each_object(File){ |f|
-      f.close unless f === filehandle rescue nil}
     pid = Process.fork
     if pid.nil?
       $stdout.reopen("#{addr}.log", 'w')
