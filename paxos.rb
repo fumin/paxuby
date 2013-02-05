@@ -32,9 +32,8 @@ module Paxos
     res
   end
   def _propose id, command, opts={}
-    n = opts[:n] ||
-          select_n_where_id_from_disk(id, opts[:disk_conn]) || SmallestProposeN
-    raise "#{n} < SmallestProposeN" unless n >= SmallestProposeN
+    n = opts[:n] || choose_n_from_disk(id, opts[:disk_conn]) || SmallestProposeN
+    raise "pid: #{Process.pid}, local_addr: #{LocalData['local_addr']}, #{n} < SmallestProposeN, opts = #{opts}, id = #{id}" unless n >= SmallestProposeN
     promise_msgs, ignore_msgs = send_prepare_msgs id, n
 
     # send accept message if a majority of replicas promised us
@@ -100,6 +99,12 @@ module Paxos
       result = false if msg == HeartbeatPong
     end
     result
+  end
+
+  def choose_n_from_disk id, conn=nil
+    disk_n = select_n_where_id_from_disk id, conn
+    return unless disk_n
+    increment_n disk_n
   end
 
   def increment_n n

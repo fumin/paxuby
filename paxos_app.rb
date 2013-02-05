@@ -1,3 +1,5 @@
+require 'json'
+
 module Paxos; end
 module Paxos::App
   class Command
@@ -29,7 +31,12 @@ module Paxos::App
   def execute command
     case command.instruction
     when Command::NoOp; Result.new(true, true)
-    when Command::SET; Result.new(true, Paxos::H[command.k] = command.v)
+    when Command::SET
+      obj = nil
+      begin; obj = JSON.load command.v
+      rescue JSON::ParserError; end
+      obj ||= command.v
+      Result.new(true, Paxos::H[command.k] = obj)
     when Command::GET; Result.new(true, Paxos::H[command.k])
     when Command::DEL; Result.new(true, Paxos::H.delete(command.k))
     else; Result.new(false, "Unrecognized command: #{command}")

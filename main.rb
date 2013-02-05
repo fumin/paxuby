@@ -8,7 +8,6 @@ Paxos::LocalData['local_port'] =
   Paxos::LocalData['local_addr'].match(/:(\d+)$/)[1].to_i
 
 Paxos::H['addrs'] = ['127.0.0.1:6660', '127.0.0.1:6661', '127.0.0.1:6662']
-#Paxos::H['addrs'] = ['127.0.0.1:6660']
 Paxos::H['leader'] = Paxos::H['addrs'][0]
 
 puts "pid: #{Process.pid}, ADDR: #{Paxos::LocalData['local_addr']}, PORT: #{Paxos::LocalData['local_port']}, H: #{Paxos::H}"

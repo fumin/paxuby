@@ -1,32 +1,12 @@
-require 'fileutils'
 require 'bacon'
 
 require './paxos'
+require './test/util'
 require './app/client'
 
 MachineAddrs = ['127.0.0.1:6660', '127.0.0.1:6661', '127.0.0.1:6662']
 
 describe 'test paxos' do
-  def start_machine addr, pids, opts={}
-    pid = Process.fork
-    if pid.nil?
-      $stdout.reopen("#{addr}.log", 'w')
-      unless opts[:dont_setup_disk]
-        FileUtils.rm ["#{addr}paxos.db"], force: true
-        Paxos.setup_disk "#{addr}paxos.db"
-      end
-      exec("ruby main.rb #{addr}")
-    else
-      loop do # ensure machine is able to serve requests
-        c = Paxos::Client.new addr
-        s = nil; begin; s = c.puts_and_gets('')
-        rescue Errno::EPIPE, Errno::ECONNREFUSED; end
-        break if s
-      end
-      pids << pid
-    end
-  end
-
   before do
     FileUtils.rm Dir.glob('*.log'), force: true
     @machine_pids = []
@@ -36,16 +16,17 @@ describe 'test paxos' do
   end
 
   after do
+    close_all_fds
     @machine_pids.each do |pid|
-      begin; Process.kill "HUP", pid
-      rescue Errno::ESRCH; end
+      stop_machine pid
     end
     Process.waitall
   end
 
   def check_success addrs
     client = App::Client.new '127.0.0.1:6661'
-    client.get(:key).should.equal "Please contact the leader: 127.0.0.1:6660"
+    redirect_str = "Please contact the leader: 127.0.0.1:6660"
+    client.get(:key, false).should.equal redirect_str
     client = App::Client.new '127.0.0.1:6660'
     client.get(:key).should.equal 'nil'
     client.set(:key, :value).should.equal 'value'
@@ -99,12 +80,11 @@ describe 'test paxos' do
     client.get(:key).should.equal 'value'
     Process.kill 'HUP', @machine_pids[0]; Process.wait(@machine_pids[0])
 
-    client = App::Client.new '127.0.0.1:6661'
-    client.get(:key).should.equal "Please contact the leader: 127.0.0.1:6660"
-    sleep(Paxos::HeartbeatTimeout * 2)
+    client = App::Client.new '127.0.0.1:6661', MachineAddrs
+    redirect_str = "Please contact the leader: 127.0.0.1:6660"
+    client.get(:key, false).should.equal redirect_str
 
-    # After we waited for around Paxos::HeartbeatTimeout seconds since the
-    # original leader has died, some replica should promote itself to be leader
+    # Upon leader's death, some replica should promote itself to be leader
     leader_addr = client.find_leader
     ['127.0.0.1:6661', '127.0.0.1:6662'].should.include?(leader_addr)
     client = App::Client.new leader_addr
@@ -133,5 +113,61 @@ describe 'test paxos' do
       # consistency of logs of every machine
       log.should.equal logs[0]
     end
+  end
+
+  it 'should pause when more than half of the machines are down' do
+    client = App::Client.new '127.0.0.1:6660'
+    client.get(:key).should.equal 'nil'
+    client.set(:key, :value).should.equal 'value'
+    client.get(:key).should.equal 'value'
+    Process.kill 'HUP', @machine_pids[1]; Process.wait(@machine_pids[1])
+    Process.kill 'HUP', @machine_pids[2]; Process.wait(@machine_pids[2])
+
+    redirect_str = "Please contact the leader: 127.0.0.1:6660"
+    client.get(:key, false).should.equal redirect_str
+
+    start_machine MachineAddrs[1], @machine_pids
+    loop do
+      break if 'value' == client.set(:keyy, :value)
+      sleep(0.2*rand)
+    end
+    client.get(:keyy).should.equal 'value'
+
+    logs = []
+    MachineAddrs[0..1].each do |addr|
+      logs << Paxos.disk_conn("#{addr}paxos.db").execute("SELECT * FROM paxos")
+    end
+    logs.each do |log|
+      log.should.equal logs[0]
+    end
+  end
+
+  it 'should be able to change cluster size' do
+    client = App::Client.new '127.0.0.1:6660'
+    new_addrs = ['127.0.0.1:6660', '127.0.0.1:6661', '127.0.0.1:6662',
+                 '127.0.0.1:6663', '127.0.0.1:6664', '127.0.0.1:6665',
+                 '127.0.0.1:6666', '127.0.0.1:6667', '127.0.0.1:6668']
+    addrs_str = JSON.dump new_addrs
+    client.puts_and_gets "#{Paxos::App::Command::SET} addrs #{addrs_str}"
+
+    # We should be redirected since we have only 4 over 9 machines
+    redirect_str = "Please contact the leader: 127.0.0.1:6660"
+    start_machine '127.0.0.1:6663', @machine_pids
+    5.times{ client.get(:key, false) }
+    client.get(:key, false).should.equal redirect_str
+
+    # 5 over 9 machines is sufficient
+    start_machine '127.0.0.1:6664', @machine_pids
+    5.times{ client.get(:key, false) }
+    client.get(:key).should.equal 'nil'
+    client.set(:key, :value).should.equal 'value'
+    client.get(:key).should.equal 'value'
+
+    # back to normal configuration
+    addrs_str = JSON.dump MachineAddrs
+    client.puts_and_gets "#{Paxos::App::Command::SET} addrs #{addrs_str}"
+    stop_machine @machine_pids[-2]; stop_machine @machine_pids[-1]
+    client.del(:key, :value).should.equal 'value'
+    client.get(:key).should.equal 'nil'
   end
 end
