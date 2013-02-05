@@ -8,13 +8,13 @@ MachineAddrs = ['127.0.0.1:6660', '127.0.0.1:6661', '127.0.0.1:6662']
 
 describe 'test paxos' do
   def start_machine addr, pids, opts={}
-    unless opts[:dont_setup_disk]
-      FileUtils.rm ["#{addr}paxos.db"], force: true
-      Paxos.setup_disk "#{addr}paxos.db"
-    end
     pid = Process.fork
     if pid.nil?
       $stdout.reopen("#{addr}.log", 'w')
+      unless opts[:dont_setup_disk]
+        FileUtils.rm ["#{addr}paxos.db"], force: true
+        Paxos.setup_disk "#{addr}paxos.db"
+      end
       exec("ruby main.rb #{addr}")
     else
       loop do # ensure machine is able to serve requests
