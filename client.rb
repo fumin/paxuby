@@ -26,7 +26,6 @@ class Paxos::Client
     msg = puts_and_gets in_msg
     if m = msg.match(/^Please contact the leader: ([\w\.]+:\d+)$/)
       @addr = m[1]
-      #sleep(rand)
       if recursion_depth < MAX_REDIRECT_DEPTH
         msg = puts_gets_follow_redirect in_msg, recursion_depth+1
       end
