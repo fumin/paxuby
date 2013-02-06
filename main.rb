@@ -21,7 +21,7 @@ Thread.new do
     next if local_addr == Paxos::H['leader']
 
     if Paxos.should_become_leader?
-      puts "TRYTOBELEADER!!!!!!!!! #{Process.pid}"
+      puts "TRYTOBELEADER!!!!!!!!! #{Process.pid} #{Time.now}"
       command = "#{Paxos::App::Command::SET} leader #{local_addr}"
       p = Paxos.propose Paxos.smallest_executable_id, command, timeout: 0.3
       if p.is_a?(Paxos::SuccessfulProposal) and local_addr == Paxos::H['leader']
@@ -80,7 +80,8 @@ Thread.new do
     (Paxos.smallest_executable_id..end_id).each do |id|
       # propose until our acceptor has accepted for this id
       loop do
-        p = Paxos.propose id, Paxos::App::Command::NoOp, disk_conn: db
+        p = Paxos.propose id, Paxos::App::Command::NoOp,
+                          disk_conn: db, wait_for_all_acceptors: true
         break if p.accepted_msgs.find{|m| m.addr == local_addr }
       end
     end

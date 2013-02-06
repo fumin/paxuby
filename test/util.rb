@@ -17,6 +17,7 @@ def start_machine addr, pids, opts={}
       s = nil; begin; s = c.puts_and_gets('gibberish')
       rescue Errno::EPIPE, Errno::ECONNREFUSED; end
       break if s =~ /^USAGE:/
+      sleep(0.01)
     end
     pids << pid
   end

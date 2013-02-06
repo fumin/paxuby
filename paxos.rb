@@ -34,7 +34,7 @@ module Paxos
   def _propose id, command, opts={}
     n = opts[:n] || choose_n_from_disk(id, opts[:disk_conn]) || SmallestProposeN
     raise "pid: #{Process.pid}, local_addr: #{LocalData['local_addr']}, #{n} < SmallestProposeN, opts = #{opts}, id = #{id}" unless n >= SmallestProposeN
-    promise_msgs, ignore_msgs = send_prepare_msgs id, n
+    promise_msgs, ignore_msgs = send_prepare_msgs id, n, opts
 
     # send accept message if a majority of replicas promised us
     if promise_msgs.size > H['addrs'].size.to_f / 2
@@ -44,7 +44,7 @@ module Paxos
           else
             command
           end
-      accepted_msgs, ignore_msgs = send_accept_msgs id, n, v
+      accepted_msgs, ignore_msgs = send_accept_msgs id, n, v, opts
 
       # consenses reached if a majority of replicas accepted
       if accepted_msgs.size > H['addrs'].size.to_f/2
@@ -55,36 +55,52 @@ module Paxos
     largest_ignore_msgs = ignore_msgs.max{|a, b| a.n <=> b.n}
     FailedProposal.new(id, (largest_ignore_msgs ? largest_ignore_msgs.n : n))
   end
-  def send_prepare_msgs id, n
+
+  def send_prepare_msgs id, n, opts={}
     msg_to_be_sent = "#{id} #{Msg::PREPARE} #{n}"
-    responses = send_msg_to_acceptors_and_collect_reponses msg_to_be_sent
+    responses = send_msg_to_acceptors msg_to_be_sent, Msg::PROMISE, opts
     promise_msgs = responses.select{|r| r.type == Msg::PROMISE}
     ignore_msgs = responses.select{|r| r.type == Msg::IGNORED}
     [promise_msgs, ignore_msgs]
   end
-  def send_accept_msgs id, n, v
+  def send_accept_msgs id, n, v, opts={}
     msg_to_be_sent = "#{id} #{Msg::ACCEPT} #{n} #{v}"
-    responses = send_msg_to_acceptors_and_collect_reponses msg_to_be_sent
+    responses = send_msg_to_acceptors msg_to_be_sent, Msg::ACCEPTED, opts
     accepted_msgs = responses.select{|r| r.type == Msg::ACCEPTED}
     ignore_msgs = responses.select{|r| r.type == Msg::IGNORED}
     [accepted_msgs, ignore_msgs]
   end
-  def send_msg_to_acceptors_and_collect_reponses msg_to_be_sent
-    responses = []; threads = [];
-    H['addrs'].each do |addr|
-      next unless (s = Sock.connect_with_timeout(addr, 0.2))
-      threads << Thread.new(s) do |acceptor|
-        str_msg = nil
-        begin
-          Sock.puts_with_timeout acceptor, msg_to_be_sent, 0.1
-          str_msg = Sock.gets_with_timeout acceptor, 0.1
-        rescue Timeout::Error, Errno::ECONNRESET, Errno::EPIPE
-        ensure acceptor.close; end
-        msg = Paxos::Msg.new str_msg
-        responses << msg if msg.type
+  def send_msg_to_acceptors msg_to_be_sent, success_type, opts={}
+    responses = []; threads = []; addrs = H['addrs']
+    signal_queue = Queue.new; done_threads = []
+    addrs.each do |addr|
+      threads << Thread.new(addr) do |acceptor_addr|
+        if acceptor = Sock.connect_with_timeout(acceptor_addr, 0.2)
+          str_msg = nil
+          begin
+            Sock.puts_with_timeout acceptor, msg_to_be_sent, 0.1
+            str_msg = Sock.gets_with_timeout acceptor, 0.1
+          rescue Timeout::Error, Errno::ECONNRESET, Errno::EPIPE
+          ensure acceptor.close; end
+          msg = Paxos::Msg.new str_msg
+          responses << msg if msg.type
+        end
+        signal_queue << 'done'
       end
     end
-    threads.each{|t| t.join}
+    if opts[:wait_for_all_acceptors]
+      threads.each{|t| t.join}
+    else
+      loop do
+        done_threads << signal_queue.pop
+        break if done_threads.size == addrs.size
+  
+        # We don't need to wait for all acceptors to respond if
+        # we received successful messages from a majority of them
+        success_responses = responses.select{|r| r.type == success_type}
+        break if success_responses.size > addrs.size.to_f / 2
+      end
+    end
     responses
   end
 

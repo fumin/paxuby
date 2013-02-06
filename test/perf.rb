@@ -21,6 +21,7 @@ MachineAddrs.each do |addr|
   start_machine addr, pids
 end
 
+begin
 # increase the cluster size to 9
 addrs = ['127.0.0.1:6660', '127.0.0.1:6661', '127.0.0.1:6662',
          '127.0.0.1:6663', '127.0.0.1:6664', '127.0.0.1:6665',
@@ -77,8 +78,12 @@ end
 print "\n"
 puts ts
 
-# clean up
-pids.each do |pid|
-  stop_machine pid
+rescue Exception => e
+  puts e
+ensure
+  # clean up
+  pids.each do |pid|
+    stop_machine pid
+  end
+  Process.waitall
 end
-Process.waitall

@@ -53,9 +53,10 @@ describe 'test paxos' do
     start_machine MachineAddrs[-1], @machine_pids, dont_setup_disk: true
     client = App::Client.new '127.0.0.1:6660'
     instructions = []
-    8.times do |i|
+    5.times do |i|
       instructions << [6+i, "GET key#{i}"]
       client.get("key#{i}").should.equal 'nil'
+      sleep(0.1) if i == 0
     end
     db_res = [[1, 'GET key'], [2, 'SET key value'], [3, 'GET key'],
               [4, 'DEL key'], [5, 'GET key']] + instructions
@@ -106,9 +107,19 @@ describe 'test paxos' do
       logs << Paxos.disk_conn("#{addr}paxos.db").execute("SELECT * FROM paxos")
     end
     logs.each do |log|
-      # the promised_n's of the last 9 paxos should equal to 0
-      log[-9..-1].should.all?{|row| row[1] == 0}
+      # the promised_n's till the last 9 paxos should be larger than 0 because
+      # the newly started MachineAddrs[0] needs to catch up with others
       log[0...-9].should.all?{|row| row[1] > 0}
+
+      # logs should be as expected
+      first_3_commands = log[0, 3].map{|row| row[2]}
+      first_3_commands.should.equal ['GET key', 'SET key value', 'GET key']
+      last_14_commands = log[-14..-1].map{|row| row[2]}
+      c14 = ['PAXOS_GET leader', 'GET key', 'SET key another_value', 'GET key',
+             'DEL key']
+      8.times{c14 << 'GET key'}
+      c14 << 'PAXOS_GET leader'
+      last_14_commands.should.equal c14
 
       # consistency of logs of every machine
       log.should.equal logs[0]
