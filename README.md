@@ -20,6 +20,7 @@ Assuming you are using the default key-value backend,
     - 127.0.0.1:6661
     - 127.0.0.1:6662
   ```
+
 * Run `ruby main.rb` in each machine
 * Interract with Paxos using the built-in client:
   ```
@@ -31,6 +32,7 @@ Assuming you are using the default key-value backend,
   irb> client.get 'some_key'
     => 'the_value'
   ```
+
 * Enjoy the fault-tolerance provided by Paxos
 
 ## Interface between paxuby and backends
@@ -38,7 +40,8 @@ The main interface lies in the `App` module. Custom backends can be supported by
 * the class `App::Command` which assigns the instance variable `@err_msg`
   when there's an error parsing a command string
 * the module_function `App.execute`, which is expected to return a `Paxos::App::Result` object.
-A straight forward example be found in './app/app.rb'.
+
+A straight forward example can be found in './app/app.rb'.
 
 ## Testing and Profiling
 * Run `bacon test/test.rb` to run all tests
