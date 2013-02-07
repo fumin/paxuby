@@ -11,7 +11,7 @@ Besides the above guarantess, this particular implementation aims at:
 * providing a convenient interface to add Paxos support for arbitrary backends, possibly Postgresql, Mysql, Redis, etc. (a feature that is theoretically given but less seen in actually implementations)
 * easier maintenance by being written in a high level language, while sustaining sufficient performance (median < 10ms, 90% < 15ms, 99% < 20ms)
 
-## Synopsis
+## Usage
 Assuming you are using the default key-value backend,
 * Set up 'config.yaml' to list the IPs of your cluster, for example
   ```
