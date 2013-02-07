@@ -6,6 +6,7 @@ The Paxos algorithm is a cornerstone in building *distributed*, *fault-tolerant*
 storage systems. Regardless of its backend, under the assumption that only *less than half* of a system's instances may encouter failures, Paxos guarantees that:
 * service continues to be available without performance compromises
 * data remains consistent at every single moment (compare [Eventual consistency](http://en.wikipedia.org/wiki/Eventual_consistency))
+
 Besides the above guarantess, this particular implementation aims at:
 * providing a convenient interface to add Paxos support for arbitrary backends, possibly Postgresql, Mysql, Redis, etc. (a feature that is theoretically given but less seen in actually implementations)
 * easier maintenance by being written in a high level language, while sustaining sufficient performance (median < 10ms, 90% < 15ms, 99% < 20ms)
