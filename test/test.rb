@@ -1,3 +1,4 @@
+require 'yaml'
 require 'bacon'
 
 require './paxos'
@@ -8,6 +9,8 @@ MachineAddrs = ['127.0.0.1:6660', '127.0.0.1:6661', '127.0.0.1:6662']
 
 describe 'test paxos' do
   before do
+    @original_conf = File.read('./config.yaml')
+    File.write('./config.yaml', YAML.dump({'addrs' => MachineAddrs}))
     FileUtils.rm Dir.glob('*.log'), force: true
     @machine_pids = []
     MachineAddrs.each do |addr|
@@ -16,6 +19,7 @@ describe 'test paxos' do
   end
 
   after do
+    File.write('./config.yaml', @original_conf)
     close_all_fds
     @machine_pids.each do |pid|
       stop_machine pid
@@ -33,8 +37,8 @@ describe 'test paxos' do
     client.get(:key).should.equal 'value'
     client.del(:key).should.equal 'value'
     client.get(:key).should.equal 'nil'
-    db_res = [[1, 0, 'GET key'], [2, 0, 'SET key value'], [3, 0, 'GET key'],
-              [4, 0, 'DEL key'], [5, 0, 'GET key']]
+    db_res = [[1, 1, 'GET key'], [2, 1, 'SET key value'], [3, 1, 'GET key'],
+              [4, 1, 'DEL key'], [5, 1, 'GET key']]
     addrs.each do |addr|
       sql = 'SELECT * FROM paxos'
       Paxos.disk_conn("#{addr}paxos.db").execute(sql).should.equal db_res
@@ -69,8 +73,8 @@ describe 'test paxos' do
     end
     nss.each do |ns|
       ns.should.equal nss[0]
-      ns[0, 6].should.all?{|n| n == 1}
-      ns[6..-1].should.all?{|n| n == 0}
+      ns[0, 6].should.all?{|n| n == 6}
+      ns[6..-1].should.all?{|n| n == 1}
     end
   end
 
@@ -102,14 +106,14 @@ describe 'test paxos' do
     end
     client.find_leader.should.equal leader_addr
 
-    logs = []
+    sleep(0.1); logs = []
     MachineAddrs.each do |addr|
       logs << Paxos.disk_conn("#{addr}paxos.db").execute("SELECT * FROM paxos")
     end
     logs.each do |log|
-      # the promised_n's till the last 9 paxos should be larger than 0 because
+      # the promised_n's till the last 9 paxos should be larger than 1 because
       # the newly started MachineAddrs[0] needs to catch up with others
-      log[0...-9].should.all?{|row| row[1] > 0}
+      log[0...-9].should.all?{|row| row[1] > 1}
 
       # logs should be as expected
       first_3_commands = log[0, 3].map{|row| row[2]}
@@ -160,6 +164,7 @@ describe 'test paxos' do
                  '127.0.0.1:6666', '127.0.0.1:6667', '127.0.0.1:6668']
     addrs_str = JSON.dump new_addrs
     client.puts_and_gets "#{Paxos::App::Command::SET} addrs #{addrs_str}"
+    File.write('./config.yaml', YAML.dump({'addrs' => new_addrs}))
 
     # We should be redirected since we have only 4 over 9 machines
     redirect_str = "Please contact the leader: 127.0.0.1:6660"

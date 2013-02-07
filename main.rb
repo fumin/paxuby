@@ -1,13 +1,14 @@
-require 'ipaddr'
+require 'yaml'
 
 require './paxos'
 require './app/app'
 
+CONFIG = YAML.load(File.read('./config.yaml'))
 Paxos::LocalData['local_addr'] = ARGV[0]
 Paxos::LocalData['local_port'] =
   Paxos::LocalData['local_addr'].match(/:(\d+)$/)[1].to_i
 
-Paxos::H['addrs'] = ['127.0.0.1:6660', '127.0.0.1:6661', '127.0.0.1:6662']
+Paxos::H['addrs'] = CONFIG['addrs']
 Paxos::H['leader'] = Paxos::H['addrs'][0]
 
 puts "pid: #{Process.pid}, ADDR: #{Paxos::LocalData['local_addr']}, PORT: #{Paxos::LocalData['local_port']}, H: #{Paxos::H}"
@@ -26,6 +27,7 @@ Thread.new do
       p = Paxos.propose Paxos.smallest_executable_id, command, timeout: 0.3
       if p.is_a?(Paxos::SuccessfulProposal) and local_addr == Paxos::H['leader']
         Paxos::ClientHandlerQueue << Paxos::ClientHandlerRefreshId
+        puts "WE BECAME THE LEADER!!!!! #{Process.pid} #{Time.now}"
       end
     end
   end
@@ -62,7 +64,6 @@ Thread.new do
     elsif ign_msgs.size > 0
       client.puts "Please contact the leader: #{Paxos::H['leader']}"
       id += 1
-      sleep 0.2
     else
       client.puts "Please contact the leader: #{Paxos::H['leader']}"
     end
@@ -128,7 +129,8 @@ Thread.new do
                        App.execute request.v
                      end
           if exec_res.is_successful
-            Paxos::Disk.new(request.id, request.n, request.v).save_n_v_to_disk db
+            n = [request.n, Paxos::SmallestProposeN].max
+            Paxos::Disk.new(request.id, n, request.v).save_n_v_to_disk(db)
             response = "#{request.id} #{Paxos::Msg::ACCEPTED} #{local_addr} #{exec_res.value}"
           else
             response = "#{request.id} execution_failed"

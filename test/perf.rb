@@ -1,5 +1,15 @@
+require 'yaml'
 require './test/util'
 require './app/client'
+
+def nil_on_err
+  res = nil
+  begin
+    res = yield
+  rescue Exception
+  end
+  res
+end
 
 def profile
   start_time = Time.now.to_f
@@ -20,6 +30,7 @@ MachineAddrs = ['127.0.0.1:6660', '127.0.0.1:6661', '127.0.0.1:6662']
 MachineAddrs.each do |addr|
   start_machine addr, pids
 end
+original_config = File.read('./config.yaml')
 
 begin
 # increase the cluster size to 9
@@ -29,10 +40,10 @@ addrs = ['127.0.0.1:6660', '127.0.0.1:6661', '127.0.0.1:6662',
 addrs_str = JSON.dump addrs
 client = App::Client.new '127.0.0.1:6660', addrs
 client.puts_and_gets "#{Paxos::App::Command::SET} addrs #{addrs_str}"
+File.write('./config.yaml', YAML.dump({'addrs' => addrs}))
 addrs[3..-1].each do |addr|
   start_machine addr, pids
 end
-client.puts_and_gets "#{Paxos::App::Command::SET} addrs #{addrs_str}"
 
 # =======================================
 # Profile for normal mode
@@ -41,20 +52,19 @@ puts "Profile normal situations (though replicas might die):"
 time_spents = []
 long_str = 'abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz'
 333.times do |i|
-  time_spents << profile{ msg = client.get(i)
-                          puts "#{msg} #{i} get" if msg != 'nil' }
-  time_spents << profile{ msg = client.set(i, long_str)
-                          puts "#{msg} #{i} set" if msg != long_str }
-  time_spents << profile{ msg = client.get(i)
-                          puts "#{msg} #{i} del" if msg != long_str}
-  # kill some replicas
+  time_spents << profile{ until nil_on_err{client.get(i)} == 'nil'
+                          client.find_leader; sleep(0.05); end }
+  time_spents << profile{ until nil_on_err{client.set(i, long_str)} == long_str
+                          client.find_leader; sleep(0.05); end }
+  time_spents << profile{ until nil_on_err{client.get(i)} == long_str
+                          client.find_leader; sleep(0.05); end }
   if i % 100 == 0
     pid_index = 1 + i/100
     stop_machine pids[pid_index]
   end
 end
-puts data_to_freq(time_spents)
-
+stats = data_to_freq(time_spents)
+stats.each_pair{|k, v| puts "#{k}, #{v}"}
 
 # =====================================
 # profile for how long it takes for a replica to be promoted to leader
@@ -79,9 +89,12 @@ print "\n"
 puts ts
 
 rescue Exception => e
-  puts e
+  puts `ps aux | grep ruby`
+  puts e.to_s; puts e.backtrace
+  sleep(1000)
 ensure
   # clean up
+  File.write('./config.yaml', original_config)
   pids.each do |pid|
     stop_machine pid
   end

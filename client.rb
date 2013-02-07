@@ -11,7 +11,7 @@ class Paxos::Client
 
   def puts_and_gets in_msg
     s = Paxos::Sock.connect_with_timeout @addr, 0.2
-    raise Errno::ECONNREFUSED unless s
+    raise "Errno::ECONNREFUSED #{@addr}" unless s
     msg = ''
     begin
       s.puts in_msg
@@ -25,6 +25,7 @@ class Paxos::Client
   def puts_gets_follow_redirect in_msg, recursion_depth=0
     msg = puts_and_gets in_msg
     if m = msg.match(/^Please contact the leader: ([\w\.]+:\d+)$/)
+      sleep(0.1) if m[1] == @addr
       @addr = m[1]
       if recursion_depth < MAX_REDIRECT_DEPTH
         msg = puts_gets_follow_redirect in_msg, recursion_depth+1
@@ -38,13 +39,14 @@ class Paxos::Client
       addr = ''
       begin
         addr = puts_gets_follow_redirect "#{Paxos::App::Command::GET} leader"
-      rescue Errno::ECONNREFUSED => e; end
+      rescue Exception; end
       if addr =~ /^[\w\.]+:\d+$/
         @addr = addr; return @addr
       end
       if @cluster_addrs.size > 0 and rand(3) == 0
         @addr = @cluster_addrs.sample
       end
+      sleep(0.2)
     end
   end
 end

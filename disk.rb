@@ -48,7 +48,12 @@ class Paxos::Disk
 
   def save_n_v_to_disk conn=nil
     raise "id and n should not be nil" unless @id and @n
-    (conn || Paxos.disk_conn).execute("INSERT OR REPLACE INTO paxos(id, promised_n, v) VALUES(#{@id}, #{@n}, '#{@v || 'NULL'}')")
+    begin
+      (conn || Paxos.disk_conn).execute("INSERT OR REPLACE INTO paxos(id, promised_n, v) VALUES(#{@id}, #{@n}, '#{@v || 'NULL'}')")
+    rescue SQLite3::CantOpenException
+      sleep(0.05)
+      retry
+    end
   end
 
   def save_n_to_disk conn=nil

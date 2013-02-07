@@ -15,7 +15,7 @@ def start_machine addr, pids, opts={}
     loop do # ensure machine is able to serve requests
       c = Paxos::Client.new addr
       s = nil; begin; s = c.puts_and_gets('gibberish')
-      rescue Errno::EPIPE, Errno::ECONNREFUSED; end
+      rescue Exception; end
       break if s =~ /^USAGE:/
       sleep(0.01)
     end

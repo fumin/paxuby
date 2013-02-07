@@ -98,7 +98,11 @@ module Paxos
         # We don't need to wait for all acceptors to respond if
         # we received successful messages from a majority of them
         success_responses = responses.select{|r| r.type == success_type}
-        break if success_responses.size > addrs.size.to_f / 2
+        if success_responses.size > addrs.size.to_f / 2 and
+             (success_type == Msg::PROMISE or
+               success_responses.find{|r| r.addr == LocalData['local_addr']})
+          break
+        end
       end
     end
     responses

@@ -1,10 +1,24 @@
 require './paxos_app'
 
 module App
+  class BaseCommand
+    attr_reader :err_msg
+    def initialize s
+      @err_msg = 'Not implemented'
+    end
+  end
+
+  module_function
+  def execute s
+    # Paxos::App::Result.new(is_successful?, result_value)
+  end
+end
+
+module App
   DICT = {}
-  class Command
+  class Command < BaseCommand
     SET = 'SET'; GET = 'GET'; DEL = 'DEL'
-    attr_reader :type, :key, :value, :err_msg
+    attr_reader :type, :key, :value
     def initialize s
       if m = s.match(/^#{SET} (\w+) (\S+)$/)
         @type = SET; @key = m[1]; @value = m[2]
