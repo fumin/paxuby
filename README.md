@@ -50,7 +50,7 @@ A straight forward example can be found in './app/app.rb'.
 
 ## Performance
 The results of `ruby test/perf.rb` for the response time is 7.5ms for the 50th percentil, 24ms for the 90th, but 600ms for the 99th.
-The below charts show the distribution (note that we omited the long tail which is actually important in real world applications) and the results of gperftools for the leader and replicas:
+The below charts show the distribution (note that we omited the long tail which is actually important in real world applications) and the results of gperftools for the leader and replicas (wallclock time):
 ![response time histogram](img/histogram.png)
 ![leader perf](img/leader_perf.gif)
 ![replica perf](img/replica_perf.gif)
