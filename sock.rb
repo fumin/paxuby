@@ -13,7 +13,7 @@ module Paxos::Sock
     m = addr.match(/([\w\.]+):(\d+)/)
     socket = Socket.new(Socket::AF_INET, Socket::SOCK_STREAM, 0)
     begin; socket.connect_nonblock(Socket.pack_sockaddr_in(m[2].to_i, m[1]))
-    rescue Errno::EINPROGRESS; end
+    rescue Errno::EINPROGRESS, Errno::EHOSTUNREACH; end
     rs, ws, = IO.select([], [socket], [], timeout)
     if ws
       ws[0]

@@ -11,7 +11,7 @@ describe 'test paxos' do
   before do
     @original_conf = File.read('./config.yaml')
     File.write('./config.yaml', YAML.dump({'addrs' => MachineAddrs}))
-    FileUtils.rm Dir.glob('*.log'), force: true
+    FileUtils.rm Dir.glob('tmp/*'), force: true
     @machine_pids = []
     MachineAddrs.each do |addr|
       start_machine addr, @machine_pids
@@ -39,6 +39,7 @@ describe 'test paxos' do
     client.get(:key).should.equal 'nil'
     db_res = [[1, 1, 'GET key'], [2, 1, 'SET key value'], [3, 1, 'GET key'],
               [4, 1, 'DEL key'], [5, 1, 'GET key']]
+    sleep(0.1)
     addrs.each do |addr|
       sql = 'SELECT * FROM paxos'
       Paxos.disk_conn("#{addr}paxos.db").execute(sql).should.equal db_res

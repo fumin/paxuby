@@ -4,7 +4,7 @@ require './client'
 def start_machine addr, pids, opts={}
   pid = Process.fork
   if pid.nil?
-    $stdout.reopen("#{addr}.log", 'w')
+    $stdout.reopen("tmp/#{addr}.log", 'w')
     close_all_fds
     unless opts[:dont_setup_disk]
       FileUtils.rm ["#{addr}paxos.db"], force: true
@@ -37,4 +37,10 @@ def close_all_fds
     rescue
     end
   end
+end
+
+def profile
+  start_time = Time.now.to_f
+  yield
+  ((Time.now.to_f - start_time)*1000).to_i
 end

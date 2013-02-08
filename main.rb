@@ -10,11 +10,17 @@ Paxos::LocalData['local_port'] =
 
 Paxos::H['addrs'] = CONFIG['addrs']
 Paxos::H['leader'] = Paxos::H['addrs'][0]
+Paxos::HeartbeatTimeout = (CONFIG['heartbeat_timeout'] || 1) # seconds
 
 puts "pid: #{Process.pid}, ADDR: #{Paxos::LocalData['local_addr']}, PORT: #{Paxos::LocalData['local_port']}, H: #{Paxos::H}"
 
+if CONFIG['perftools']
+  require 'perftools'
+  PerfTools::CpuProfiler.start("tmp/#{ARGV[0]}perftool")
+end
+
 # heartbeat listener thread
-Thread.new do
+heartbeat_thread = Thread.new do
   Thread.current.abort_on_exception = true
   local_addr = Paxos::LocalData['local_addr']
   loop do
@@ -24,7 +30,8 @@ Thread.new do
     if Paxos.should_become_leader?
       puts "TRYTOBELEADER!!!!!!!!! #{Process.pid} #{Time.now}"
       command = "#{Paxos::App::Command::SET} leader #{local_addr}"
-      p = Paxos.propose Paxos.smallest_executable_id, command, timeout: 0.3
+      p = Paxos.propose Paxos.smallest_executable_id, command,
+                        timeout: 1, wait_for_all_acceptors: true
       if p.is_a?(Paxos::SuccessfulProposal) and local_addr == Paxos::H['leader']
         Paxos::ClientHandlerQueue << Paxos::ClientHandlerRefreshId
         puts "WE BECAME THE LEADER!!!!! #{Process.pid} #{Time.now}"
@@ -33,7 +40,7 @@ Thread.new do
   end
 end
 # Client handler thread
-Thread.new do
+clienthandler_thread = Thread.new do
   Thread.current.abort_on_exception = true
   local_addr = Paxos::LocalData['local_addr']
   db = Paxos.disk_conn
@@ -71,7 +78,7 @@ Thread.new do
   end
 end
 # catchup thread
-Thread.new do
+catchup_thread = Thread.new do
   Thread.current.abort_on_exception = true
   local_addr = Paxos::LocalData['local_addr']
   db = Paxos.disk_conn
@@ -81,8 +88,7 @@ Thread.new do
     (Paxos.smallest_executable_id..end_id).each do |id|
       # propose until our acceptor has accepted for this id
       loop do
-        p = Paxos.propose id, Paxos::App::Command::NoOp,
-                          disk_conn: db, wait_for_all_acceptors: true
+        p = Paxos.propose id, Paxos::App::Command::NoOp, disk_conn: db
         break if p.accepted_msgs.find{|m| m.addr == local_addr }
       end
     end
@@ -90,7 +96,7 @@ Thread.new do
   end
 end
 # acceptor thread
-Thread.new do
+acceptor_thread = Thread.new do
   Thread.current.abort_on_exception = true
   local_addr = Paxos::LocalData['local_addr']
   db = Paxos.disk_conn
@@ -156,6 +162,11 @@ loop do
       client.puts "newline at the end needed"; client.close; Thread.exit
     else
       str_msg = str_msg[0...-1]
+    end
+
+    if str_msg == 'exit'
+      PerfTools::CpuProfiler.stop if CONFIG['perftools']
+      Process.exit
     end
 
     if str_msg == Paxos::HeartbeatPing

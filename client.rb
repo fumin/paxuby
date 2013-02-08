@@ -4,7 +4,8 @@ require './paxos_app'
 
 module Paxos; end
 class Paxos::Client
-  MAX_REDIRECT_DEPTH = 5
+  attr_accessor :addr, :cluster_addrs
+  MAX_REDIRECT_DEPTH = 3
   def initialize addr, cluster_addrs=[]
     @addr = addr; @cluster_addrs = cluster_addrs
   end
@@ -24,7 +25,7 @@ class Paxos::Client
 
   def puts_gets_follow_redirect in_msg, recursion_depth=0
     msg = puts_and_gets in_msg
-    if m = msg.match(/^Please contact the leader: ([\w\.]+:\d+)$/)
+    if m = msg.match(/^Please contact.* ([\w\.]+:\d+)$/)
       sleep(0.1) if m[1] == @addr
       @addr = m[1]
       if recursion_depth < MAX_REDIRECT_DEPTH

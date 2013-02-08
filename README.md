@@ -3,13 +3,13 @@ Paxos algorithm in Ruby
 
 ## Introduction
 The Paxos algorithm is a cornerstone in building *distributed*, *fault-tolerant*
-storage systems. Regardless of its backend, under the assumption that only *less than half* of a system's instances may encouter failures, Paxos guarantees that:
+storage systems. Notable real world applications include [Chubby](http://www.read.seas.harvard.edu/~kohler/class/08w-dsi/chandra07paxos.pdf), Google's lock managing system that serves the Google Filesystem(GFS) and [Gaios](http://static.usenix.org/event/nsdi11/tech/full_papers/Bolosky.pdf), Microsoft's replicated datastore. Regardless of its backend, under the assumption that only *less than half* of a system's instances may encouter failures, Paxos guarantees that:
 * service continues to be available without performance compromises
 * data remains consistent at every single moment (compare [Eventual consistency](http://en.wikipedia.org/wiki/Eventual_consistency))
 
-Besides the above guarantess, this particular implementation aims at:
-* providing a convenient interface to add Paxos support for arbitrary backends, possibly Postgresql, Mysql, Redis, etc. (a feature that is theoretically given but less seen in actually implementations)
-* easier maintenance by being written in a high level language, while sustaining sufficient performance (median < 10ms, 90% < 15ms, 99% < 20ms)
+Besides the above guarantess, this particular implementation aims at providing:
+* a convenient interface to add Paxos support for arbitrary backends, possibly a SQL database or Redis etc. (a feature that is theoretically given but less seen in actually implementations)
+* easier maintenance and perhaps higher educational value by being written in a high level language Ruby, while sustaining as much performance as possible (please see the performance section below)
 
 ## Usage
 Assuming you are using the default key-value backend,
@@ -44,12 +44,27 @@ The main interface lies in the `App` module. Custom backends can be supported by
 A straight forward example can be found in './app/app.rb'.
 
 ## Testing and Profiling
-* Run `bacon test/test.rb` to run all tests
-* The logs of the test can be displayed by
-  ```
-  ps aux | grep ruby; cat *log; echo 'select * from paxos;' | sqlite3 '127.0.0.1:6660paxos.db'
-  ```
-* Run `ruby test/perf.rb` to profile
+* Run `bacon test/test.rb` to run all tests. The logs of the test can be displayed by `ps aux | grep ruby; cat tmp/*log; echo 'select * from paxos;' | sqlite3 '127.0.0.1:6660paxos.db'`
+* Run `ruby test/perf.rb` to test performance under normal situations where the leader does not change, but with replicas free to fail. The result printed out is the response time of a client request vesus its frequency. In addition, by default we also use [perftools.rb](https://github.com/tmm1/perftools.rb) to profile our code.
+* Run `ruby test/leader_promotion_perf.rb` to test performance for the time spent when a leader is dead, and the system automatically elects a new leader.
+
+## Performance
+The results of `ruby test/perf.rb` for the response time is 7.5ms for the 50th percentil, 24ms for the 90th, but 600ms for the 99th.
+The below charts show the distribution (note that we omited the long tail which is actually important in real world applications) and the results of gperftools for the leader and replicas:
+![response time histogram](github.com/fumin/paxuby/img/img.jpg)
+![leader perf](github.com/fumin/paxuby/img/leader_perf.jpg)
+![replica perf](github.com/fumin/paxuby/img/replica_perf.jpg)
+
+## Config options
+We read the configs from 'config.yaml' in YAML format:
+```
+addrs:
+  - 127.0.0.1:6660
+  - 127.0.0.1:6661
+  - 127.0.0.1:6662
+heartbeat_timeout: 0.75 # time for replicas to check whether leader is alive, in seconds
+perftools: false # enable gperftools profiling
+```
 
 ## License
 Copyright 2013 Awaw Fumin awawfumin@gmail.com  
@@ -57,3 +72,4 @@ Licensed under GNU Affero General Public License v3
 
 ## Todos
 * implement snapshots
+* improve performance according to gperftools results

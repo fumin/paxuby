@@ -51,6 +51,7 @@ class Paxos::Disk
     begin
       (conn || Paxos.disk_conn).execute("INSERT OR REPLACE INTO paxos(id, promised_n, v) VALUES(#{@id}, #{@n}, '#{@v || 'NULL'}')")
     rescue SQLite3::CantOpenException
+      puts "DISK ERROR save_n_v_to_disk #{@id} #{@n} #{@v}"
       sleep(0.05)
       retry
     end

@@ -14,7 +14,6 @@ module Paxos
 
   HeartbeatPing = 'paxos_heartbeat_ping'
   HeartbeatPong = 'paxos_heartbeat_pong'
-  HeartbeatTimeout = 0.75 # seconds
 
   ClientHandlerRefreshId = 'client_handler_refresh_id'
   module_function
@@ -33,7 +32,7 @@ module Paxos
   end
   def _propose id, command, opts={}
     n = opts[:n] || choose_n_from_disk(id, opts[:disk_conn]) || SmallestProposeN
-    raise "pid: #{Process.pid}, local_addr: #{LocalData['local_addr']}, #{n} < SmallestProposeN, opts = #{opts}, id = #{id}" unless n >= SmallestProposeN
+    raise "#{Process.pid}, #{n} < SmallestProposeN" unless n >= SmallestProposeN
     promise_msgs, ignore_msgs = send_prepare_msgs id, n, opts
 
     # send accept message if a majority of replicas promised us
@@ -72,13 +71,17 @@ module Paxos
   end
   def send_msg_to_acceptors msg_to_be_sent, success_type, opts={}
     responses = []; threads = []; addrs = H['addrs']
-    signal_queue = Queue.new; done_threads = []
+    signal_queue = Queue.new; done_threads = []; parent_done = false
     addrs.each do |addr|
       threads << Thread.new(addr) do |acceptor_addr|
         if acceptor = Sock.connect_with_timeout(acceptor_addr, 0.2)
+          exit_if_parent_done = lambda{if parent_done
+                                         acceptor.close; Thread.exit; end}
+          exit_if_parent_done.call
           str_msg = nil
           begin
             Sock.puts_with_timeout acceptor, msg_to_be_sent, 0.1
+            exit_if_parent_done.call
             str_msg = Sock.gets_with_timeout acceptor, 0.1
           rescue Timeout::Error, Errno::ECONNRESET, Errno::EPIPE
           ensure acceptor.close; end
@@ -105,17 +108,19 @@ module Paxos
         end
       end
     end
+    parent_done = true
     responses
   end
 
   def should_become_leader?
-    result = true; msg = nil
-    s = Sock.connect_with_timeout H['leader'], 0.2
+    result = true; msg = nil; hll = H['leader']
+    s = Sock.connect_with_timeout hll, 0.2
     if s
       begin 
         Sock.puts_with_timeout s, HeartbeatPing, 0.2
         msg = Sock.gets_with_timeout s, 0.2
-      rescue Errno::EPIPE, Errno::ECONNRESET; ensure s.close; end
+      rescue Errno::EPIPE, Errno::ECONNRESET, Timeout::Error => e
+      ensure s.close; end
       result = false if msg == HeartbeatPong
     end
     result
