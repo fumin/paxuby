@@ -33,7 +33,8 @@ Assuming you are using the default key-value backend,
     => 'the_value'
   ```
 
-* Enjoy the fault-tolerance provided by Paxos
+* Enjoy the fault-tolerance provided by Paxos by stopping one of the processes
+perhaps using ctrl-C.
 
 ## Interface between paxuby and backends
 The main interface lies in the `App` module. Custom backends can be supported by implementing:
